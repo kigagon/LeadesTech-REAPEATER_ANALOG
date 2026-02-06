@@ -51,19 +51,19 @@ void Check_ISO_Start(void){
 
 	if(ISO_MODE == ISO){
 		// 릴레이 접점 불량 확인용
-		if(Analog_Address == 0)
-		{
-			while(1){
-				Anal_ISO_IN_On_Set();
-				HAL_Delay(1000);
-				Anal_ISO_IN_Off_Set();
-				HAL_Delay(1000);
-				Anal_ISO_OUT_On_Set();
-				HAL_Delay(1000);
-				Anal_ISO_OUT_Off_Set();
-				HAL_Delay(1000);
-				}
-		}
+//		if(Analog_Address == 0)
+//		{
+//			while(1){
+//				Anal_ISO_IN_On_Set();
+//				HAL_Delay(1000);
+//				Anal_ISO_IN_Off_Set();
+//				HAL_Delay(1000);
+//				Anal_ISO_OUT_On_Set();
+//				HAL_Delay(1000);
+//				Anal_ISO_OUT_Off_Set();
+//				HAL_Delay(1000);
+//				}
+//		}
 
 		Anal_ISO_IN_RY_Mode = Rel_On;
 		Anal_ISO_OUT_RY_Mode = Rel_On;
@@ -87,7 +87,7 @@ void Check_ISO_Start(void){
 		Ana_In_ISO_Mode = ISO_Normal;
 
 		//1. 콘덴서 충전을 기다린다.
-		HAL_Delay(500);
+		HAL_Delay(1000);
 
 		//2.이전 저장된 동작 을 확인 하여 릴레이를 동작한다.
 		Flash_Read_uint8(ISO_STATUS_ADDR, &Pre_IN_Short);
@@ -232,7 +232,7 @@ void Check_ISO(void){
 
 		if((Ana_Out_ISO_Mode != ISO_Short)&(Ana_In_ISO_Mode != ISO_Short)){
 			// 1.1 전압을 체크한다.
-			COM_ADC_Volt = Analog_Read_Com_ADC_Volt_Avr(1,1);
+			COM_ADC_Volt = Analog_Read_Com_ADC_Volt_Avr(1, 1);
 			// 2.1 	전압이 떨어지면 릴레이를 오프한후 50ms 대기후전압을 다시 체크 한다
 			if(COM_ADC_Volt < comp_24V_val){
 

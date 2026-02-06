@@ -1544,7 +1544,6 @@ void Check_Ch1(void){
 			else{
 				Ch1_err_Save[0] = OS_Open;
 			}
-
 		}
 
 		Ch1_err_Save_Sum = 0;
@@ -1554,7 +1553,7 @@ void Check_Ch1(void){
 			}
 		}
 
-		if(Ch1_err_Save_Sum >= (Ch1_err_Cnt * 1.0) ){
+		if(Ch1_err_Save_Sum >= (Ch1_err_Cnt * 0.5) ){
 			Ch1_Out_Open = Open_Short_ok;
 		}
 		else{

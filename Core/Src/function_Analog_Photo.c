@@ -1,5 +1,5 @@
 
-#include "INA219.h"
+
 #include "main.h"
 #include <math.h>
 #include "flash.h"
@@ -7,46 +7,33 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
+#include "INA219.h"
 #include "function_Analog.h"
 #include "function_Analog_Photo.h"
 
+
 extern INA219_t ina219;
 extern I2C_HandleTypeDef hi2c1;
-extern uint8_t ReturnPercent;
-uint8_t DAC_10multiplied;
-float DAC_VALUE, DAC_VALUE_TEMP = 2.3;
 
-int16_t Prev_vshunt = 0, Prev_shunt_I;
-int16_t temp_Prev_vshunt[10] = {0};
-double Increasing_LedVolt_vshunt_temp[30] = {0}, Increasing_LedVolt_vshunt[30] = {0};
-double Increasing_LedVolt_Current[30] = {0};
+uint8_t DAC_100multiplied;
+float DAC_VALUE, DAC_VALUE_TEMP = 2.4;
 
-#define MAX_ADC_SAMPLES 100
-int Smoke_Avr[31];
-uint16_t AMP_LED_O_Value[MAX_ADC_SAMPLES] = {0, };
-uint16_t AMP_LED_X_Value[MAX_ADC_SAMPLES] = {0, };
-uint16_t AMP_total_Value[MAX_ADC_SAMPLES] = {0, };
-uint16_t AMP_LED_O_Value_AVG[MAX_ADC_SAMPLES] = {0, };
-uint16_t AMP_LED_X_Value_AVG[MAX_ADC_SAMPLES] = {0, };
-uint16_t AMP_total_Value_AVG[MAX_ADC_SAMPLES] = {0, };
+uint8_t PGA;
 
+uint16_t Ana_photo_O_Sen_12bit, Ana_photo_X_Sen_12bit, Flash_Ana_photo_X_Sen_12bit, Ana_photo_Sen_12bit; // O,X : IsLedOn?
 double RedefinedSlope = 17.36;
 int16_t Adjust_Y_Intercept_Value = 0;
-uint8_t UpTo22 = 0, Above22 = 1;
-uint8_t Is0xCdCmdReceived = 0;
-uint8_t FinalPcntVal_Required4SlopeCalculation;
+uint8_t FirstUpperLimitOfPercent = 0; // 감지기 내부에서 처음으로 매핑테이블 값 채워넣을 때 saturation되는 농도값 -> 이 값이 200 이하이면 무조건 매핑테이블 만들 때 기울기 두 개 써야 됨
+uint8_t FinalUpperLimitOfPercent = 0; // SMOKE 프로그램에서 0xCE 요청 올 때 표시할 농도값
+
+int16_t UserAdjustedPercent = 0;
+uint8_t FinalPcntVal_Required4SlopeCalculation = 0;
+uint16_t photoADC_Required4SlopeCalculation = 0;
+
 uint8_t PhotoStatus = 0x40;
-float volt = 0;
+uint8_t ReturnPercent = 0;
 
-/* Used In First Calibration Function */
-#define cal1_addr_size 15 // firstCalibration
-uint8_t cal1_adc_delta_crit = 100; // ADC 값의 현재-이전 값 차이 기준(Criteria)int16_t cal1_adc_delta[cal1_addr_size];
-int32_t cal1_calc_adc[cal1_addr_size] = {0} /* 첫 번째 보정에서 계산된 ADC 값 */,
-		cal1_adc_delta[cal1_addr_size] /* 계산된 ADC 값들 간의 차이 */;
-uint16_t cal1_led_x_adc,
-		cal1_led_o_adc_2p2_1p3[cal1_addr_size] = {0,}; /* 2.2V ~ 1.3V 범위 관련 LED O ADC 값 */
-
-double ADCMappingTable_Below22Percent[256] =
+double AdcToPercent_MappingTable[256] =
 {// y = 17.36x+200 -> 15%
         200.00, 217.36, 234.72, 252.08, 269.44, 286.80, 304.16, 321.52,
         338.88, 356.24, 373.60, 390.96, 408.32, 425.68, 443.04, 460.40,
@@ -81,69 +68,111 @@ double ADCMappingTable_Below22Percent[256] =
 		4540.00, 4557.36, 4574.72, 4592.08, 4609.44, 4626.80
     };
 
-void AverageCurrentValues(void)
+uint16_t AMP_LED_O_Value[MAX_ADC_SAMPLES] = {0, };
+uint16_t AMP_LED_X_Value[MAX_ADC_SAMPLES] = {0, };
+
+
+/* Used In First Calibration Function */
+#define cal1_addr_size 18 // firstCalibration
+uint8_t cal1_adc_delta_crit = 100; // ADC 값의 현재-이전 값 차이 기준(Criteria)int16_t cal1_adc_delta[cal1_addr_size];
+int32_t cal1_calc_adc[cal1_addr_size] = {0} /* 첫 번째 보정에서 계산된 ADC 값 */,
+		cal1_adc_delta[cal1_addr_size] /* 계산된 ADC 값들 간의 차이 */;
+uint16_t cal1_led_x_adc,
+		cal1_led_o_adc_2p15_1p3_interval0p5[cal1_addr_size] = {0,}; /* 2.1V ~ 1.3V 범위 관련 LED O ADC 값 */
+
+
+void SetSMOKE(void)
 {
-	HAL_DAC_Start(&hdac1, DAC_CHANNEL_1);
-	uint32_t dac_value = (uint32_t)(DAC_VALUE * 4095.0f / 3.3f);
-	HAL_DAC_SetValue(&hdac1, DAC_CHANNEL_1, DAC_ALIGN_12B_R, dac_value);
+	//ANAL_BLUE_LED(LED_ON);
 
-    uint8_t IsInitSuccess = INA219_Init(&ina219, &hi2c1, INA219_ADDRESS);
-//    vshunt = 0;
-    if(IsInitSuccess == 1)
-    {
-    	int16_t temp_Prev_vshunt[10] = {0,}, sum = 0;
-
-        // 션트 전압 읽기
-    	for(uint8_t i=0; i<10; i++)
-    	{
-    		temp_Prev_vshunt[i] = (int16_t) Read16(&ina219, INA219_REG_SHUNTVOLTAGE);
-    		sum += temp_Prev_vshunt[i];
-    	}
-
-    	Prev_vshunt = (int16_t)(sum / 10);
-		Prev_shunt_I = (int16_t)(Prev_vshunt / 0.1); // 션트 저항이 0.1Ω인 경우
-    }
-	HAL_DAC_Stop(&hdac1, DAC_CHANNEL_1);
-}
-
-void V_0to3_checkShuntCurrentValues(void)
-{
-	uint32_t dac_value = 0;
-
-	uint8_t IsInitSuccess = INA219_Init(&ina219, &hi2c1, INA219_ADDRESS);
-//   	vshunt = 0;
-	while(IsInitSuccess != 1)
+	if(Analog_Address == 0xFF)
 	{
-		HAL_Delay(1);
-		IsInitSuccess = INA219_Init(&ina219, &hi2c1, INA219_ADDRESS);
-	}
-
-	double sum = 0;
-
-	HAL_DAC_Start(&hdac1, DAC_CHANNEL_1);
-	for(uint8_t j=26; j>12; j--){
-		volt = j*0.1;
-		dac_value = (uint32_t)(volt * 4095.0f / 3.3f);
-		HAL_DAC_SetValue(&hdac1, DAC_CHANNEL_1, DAC_ALIGN_12B_R, dac_value);
-		HAL_Delay(3);
-
-		sum = 0;
-		// 션트 전압 읽기
-		for(uint8_t i=0; i<5; i++)
+		Flash_EraseAt(Waterproof_Temperature_ADDR, sizeof(uint8_t));
+		Flash_EraseAt(Adjust_Y_Intercept_ADDR, sizeof(int16_t));
+		Flash_EraseAt(LED_X_ADC_Value_ADDR, sizeof(uint16_t));
+		Flash_EraseAt(FinalPcntVal_Required4SlopeCalculation_ADDR, sizeof(uint8_t));
+		Flash_EraseAt(photoADC_Required4SlopeCalculation_ADDR, sizeof(uint16_t));
+		Flash_EraseAt(SMOKE_DAC_Multiplied_100_ADDR, sizeof(uint8_t));
+		Flash_EraseAt(SMOKE_PGA_ADDR, sizeof(uint8_t));
+		Flash_EraseAt(ISO_STATUS_ADDR, sizeof(uint8_t));
+		HAL_Delay(1000);
+		while(1)
 		{
-			Increasing_LedVolt_vshunt_temp[i] = INA219_ReadShuntVolage(&ina219);
-			sum += Increasing_LedVolt_vshunt_temp[i];
+			ANAL_RED_LED(LED_TOGGLE);
+			HAL_Delay(1000);
 		}
-		Increasing_LedVolt_vshunt[j] = sum / 5;
-		Increasing_LedVolt_Current[j] = Increasing_LedVolt_vshunt[j] / 0.1;
-		HAL_Delay(1);
 	}
-	volt = 2;
-	dac_value = (uint32_t)(volt * 4095.0f / 3.3f);
-	HAL_DAC_SetValue(&hdac1, DAC_CHANNEL_1, DAC_ALIGN_12B_R, dac_value);
+	else
+	{
+		Flash_Read_int16(Adjust_Y_Intercept_ADDR, &Adjust_Y_Intercept_Value);
+		Flash_Read_uint16(LED_X_ADC_Value_ADDR, &Flash_Ana_photo_X_Sen_12bit);
+		Flash_Read_uint8(FinalPcntVal_Required4SlopeCalculation_ADDR, &FinalPcntVal_Required4SlopeCalculation);
+		Flash_Read_uint16(photoADC_Required4SlopeCalculation_ADDR, &photoADC_Required4SlopeCalculation);
 
-	HAL_DAC_Stop(&hdac1, DAC_CHANNEL_1);
-//	HAL_Delay(50);
+		if(Adjust_Y_Intercept_Value == -1)
+		{
+		    Flash_Erase(Adjust_Y_Intercept_ADDR);
+		    Flash_Write_int16(Adjust_Y_Intercept_ADDR, 0);
+		    Flash_Read_int16(Adjust_Y_Intercept_ADDR, &Adjust_Y_Intercept_Value);
+		}
+		if(Flash_Ana_photo_X_Sen_12bit == 0xFFFF)
+		{
+			Flash_Erase(LED_X_ADC_Value_ADDR);
+			Flash_Write_uint16(LED_X_ADC_Value_ADDR, 0);
+			Flash_Read_uint16(LED_X_ADC_Value_ADDR, &Flash_Ana_photo_X_Sen_12bit);
+		}
+		if(FinalPcntVal_Required4SlopeCalculation == 0xFF)
+		{
+			Flash_Erase(FinalPcntVal_Required4SlopeCalculation_ADDR);
+			Flash_Write_uint8(FinalPcntVal_Required4SlopeCalculation_ADDR, 0);
+			Flash_Read_uint8(FinalPcntVal_Required4SlopeCalculation_ADDR, &FinalPcntVal_Required4SlopeCalculation);
+		}
+		if(photoADC_Required4SlopeCalculation == 0xFFFF)
+		{
+			Flash_Erase(photoADC_Required4SlopeCalculation_ADDR);
+			Flash_Write_uint16(photoADC_Required4SlopeCalculation_ADDR, 0);
+			Flash_Read_uint16(photoADC_Required4SlopeCalculation_ADDR, &photoADC_Required4SlopeCalculation);
+		}
+
+		// 기울기 계산
+		if((photoADC_Required4SlopeCalculation == 0))
+		{
+			RedefinedSlope = 17.36;
+		}
+		else if(FinalPcntVal_Required4SlopeCalculation == 0)
+		{
+			RedefinedSlope = 17.36;
+		}
+		else
+		{
+			RedefinedSlope = (double)photoADC_Required4SlopeCalculation / (double)FinalPcntVal_Required4SlopeCalculation;
+		}
+		RedefineSmokeTableWithADC(RedefinedSlope);
+	}
+
+//		SetPGA(DAC_VALUE, 90);
+
+	Flash_Read_uint8(SMOKE_PGA_ADDR, &PGA);
+
+	if(PGA == 0xFF)
+	{
+		PGA = 4;
+	}
+
+	Flash_Read_uint8(SMOKE_DAC_Multiplied_100_ADDR, &DAC_100multiplied);
+
+	if(DAC_100multiplied == 0xFF)
+	{
+		DAC_VALUE = DAC_VALUE_TEMP;
+	}
+	else
+	{
+		DAC_VALUE = DAC_100multiplied * 0.01;
+		if(DAC_VALUE < 1)
+		{
+			DAC_VALUE = DAC_100multiplied * 0.1;
+		}
+	}
 }
 
 uint16_t LED_X_ADC_VALUE(ADC_HandleTypeDef* pAdcHandle, uint8_t num)
@@ -211,95 +240,16 @@ uint16_t LED_O_ADC_VALUE(ADC_HandleTypeDef* pAdcHandle, float volt, uint8_t num)
 	return return_adcValue;
 }
 
-uint16_t ReadLED_O_value_ToSetPGA(uint8_t gain, float volt, uint8_t num)
-{
-	uint16_t LED_O_PhotoVal_12bit = 0;
-
-	ADC_ChannelConfTypeDef sConfig = {0};
-
-	// OPAMP 설정 및 시작
-	hopamp1.Init.Mode = OPAMP_PGA_MODE;                     // OPAMP를 내부 PGA 모드로 설정
-	if(gain == 2){hopamp1.Init.PgaGain = OPAMP_PGA_GAIN_2; }
-	else if(gain == 4){hopamp1.Init.PgaGain = OPAMP_PGA_GAIN_4; }
-	else if(gain == 8){hopamp1.Init.PgaGain = OPAMP_PGA_GAIN_8; }
-	else if(gain == 16){hopamp1.Init.PgaGain = OPAMP_PGA_GAIN_16; }
-	else	{ Error_Handler(); }
-	hopamp1.Init.InvertingInput = OPAMP_INVERTINGINPUT_CONNECT_NO;  // 반전 입력 없음
-	hopamp1.Init.NonInvertingInput = OPAMP_NONINVERTINGINPUT_IO0;   // 비반전 입력을 VINP에 연결
-
-	if (HAL_OPAMP_DeInit(&hopamp1) != HAL_OK) { Error_Handler(); return 0;}
-	if (HAL_OPAMP_Init(&hopamp1) != HAL_OK)
-	{
-	   Error_Handler();
-	}
-	if (HAL_OPAMP_Start(&hopamp1) != HAL_OK)
-	{
-	   Error_Handler();
-	}
-
-	// OPAMP 사용 후 ADC 변환
-	sConfig.Channel = ADC_CHANNEL_7; // OPAMP 출력과 연결된 ADC 채널
-	sConfig.Rank = ADC_REGULAR_RANK_1;
-	sConfig.SamplingTime = ADC_SAMPLINGTIME_COMMON_1;
-	if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
-	{
-	   Error_Handler();
-	}
-
-	LED_O_PhotoVal_12bit = LED_O_ADC_VALUE(&hadc1, volt, num);
-	return LED_O_PhotoVal_12bit;
-}
-
-void SetPGA(float volt, uint8_t num)
-{
-	uint16_t LED_O_ADC_Value = 0;
-	Flash_Read_uint8(SMOKE_PGA_ADDR, &PGA);
-	if(PGA == 0xFF)
-	{
-		PGA = 4;
-
-		LED_O_ADC_Value = ReadLED_O_value_ToSetPGA(PGA, DAC_VALUE, 60);
-
-		if(LED_O_ADC_Value < 250)
-		{
-			Flash_Erase(SMOKE_PGA_ADDR);
-			Flash_Write_uint8(SMOKE_PGA_ADDR, 8);
-		}
-		else if((LED_O_ADC_Value > 800))
-		{
-			Flash_Erase(SMOKE_PGA_ADDR);
-			Flash_Write_uint8(SMOKE_PGA_ADDR, 2);
-		}
-		else
-		{
-			Flash_Erase(SMOKE_PGA_ADDR);
-			Flash_Write_uint8(SMOKE_PGA_ADDR, 4);
-		}
-		Flash_Read_uint8(SMOKE_PGA_ADDR, &PGA);
-
-		if(PGA == 8)
-		{
-			LED_O_ADC_Value = ReadLED_O_value_ToSetPGA(PGA, DAC_VALUE, 30);
-			if(LED_O_ADC_Value < 250)
-			{
-				while((DAC_VALUE >= 1.5) && LED_O_ADC_Value < 250)
-				{
-					DAC_VALUE -= 0.1;
-					LED_O_ADC_Value = ReadLED_O_value_ToSetPGA(PGA, DAC_VALUE, 30);
-				}
-
-//				LED_O_ADC_Value = ReadLED_O_value_ToSetPGA(PGA, DAC_VALUE, 60);
-//				if(LED_O_ADC_Value < 250)
-//				{
-//					ANAL_RED_LED(LED_ON);
-//				}
-			}
-		}
-	}
-}
-
 uint16_t Return_Ana_photo_Sen_12bit(uint8_t gain, float volt, uint8_t num)
 {
+	/*
+	 * 250811 코드 추가 (외부 광 고려)
+	 * 1. 기존 코드는 ADC 하는 함수의 리턴값으로 최종 ADC 값을 받은 후, 그 값을 매핑하는 함수에 매개변수로 넣어 최종적으로 리턴 농도값을 얻는다.
+	 * 2. ADC 하는 함수의 내부에서 다음과 같은 로직 추가
+	 * 2-1. LED 껐을 때의 최종 ADC 값이 300 이상이라면
+	 * 2-2. 리턴하는 최종 ADC 값은, 기존에 리턴하려던 값의 50%만 반영해서 리턴하도록 한다.
+	 * */
+
 	ADC_ChannelConfTypeDef sConfig = {0};
 
 	// OPAMP 설정 및 시작
@@ -330,6 +280,7 @@ uint16_t Return_Ana_photo_Sen_12bit(uint8_t gain, float volt, uint8_t num)
 	{
 	   Error_Handler();
 	}
+	HAL_Delay(5);
 
 	Ana_photo_X_Sen_12bit = LED_X_ADC_VALUE(&hadc1, num);
 	Ana_photo_O_Sen_12bit = LED_O_ADC_VALUE(&hadc1, volt, num);
@@ -342,15 +293,26 @@ uint16_t Return_Ana_photo_Sen_12bit(uint8_t gain, float volt, uint8_t num)
 	}
 
 	// 최종 ADC 값 계산
-	int32_t PhotoSensorVal = 0;
+	int32_t PhotoSensorVal = 0, CheckLedOnAdc = 0;
+	CheckLedOnAdc = Ana_photo_O_Sen_12bit - Ana_photo_X_Sen_12bit;
+	if(CheckLedOnAdc < 0)
+	{
+		CheckLedOnAdc = 0;
+	}
+
 	PhotoSensorVal = Ana_photo_O_Sen_12bit - Ana_photo_X_Sen_12bit + Adjust_Y_Intercept_Value;
 	if(PhotoSensorVal < 0)
 	{
 		PhotoSensorVal = 0;
 	}
 
+	if(Ana_photo_X_Sen_12bit > 300) // 외부 광이 들어왔다고 가정
+	{
+		PhotoSensorVal = (uint16_t)(PhotoSensorVal * 0.5);
+	}
+
 	// 광전식 상태값 갱신 및 최종 리턴 값
-	PhotoStatus = CheckLED_IsShortOrOpen(&hadc1, PhotoSensorVal);
+	PhotoStatus = CheckLED_IsShortOrOpen(&hadc1, CheckLedOnAdc);
 //	PhotoStatus = 0x40;
 	if(PhotoStatus == 0x40)
 	{
@@ -362,208 +324,102 @@ uint16_t Return_Ana_photo_Sen_12bit(uint8_t gain, float volt, uint8_t num)
 	}
 }
 
-uint16_t ReturnToPercent_afterReadAdcValue(uint8_t gain, float volt, uint8_t num, uint8_t set)
+
+void RedefineSmokeTableWithADC(double slope)
 {
-	//	/* 배열 클리어 및 set, num 변수 크기 조정 START */
-	if(set > sizeof(AMP_LED_X_Value_AVG)){
-		set = sizeof(AMP_LED_X_Value_AVG);
-	}
-	for(uint8_t i=0; i<set; i++)
+	FirstUpperLimitOfPercent = MappingTableSetting_UsingOneSlope(slope);
+
+	if(FirstUpperLimitOfPercent >= 200)
 	{
-		AMP_LED_O_Value_AVG[i] = 0;
-		AMP_LED_X_Value_AVG[i] = 0;
-		AMP_total_Value_AVG[i] = 0;
+		FinalUpperLimitOfPercent = FirstUpperLimitOfPercent;
+		return;
 	}
-
-	if(num > sizeof(AMP_LED_X_Value)){
-		num = sizeof(AMP_LED_X_Value);
-	}
-
-	/* ADC, OPAMP CONFIG START */
-	ADC_ChannelConfTypeDef sConfig = {0};
-
-	hadc1.Instance = ADC1;
-	hadc1.Init.ClockPrescaler = ADC_CLOCK_SYNC_PCLK_DIV1;
-	hadc1.Init.Resolution = ADC_RESOLUTION_12B;
-	hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
-	hadc1.Init.ScanConvMode = ADC_SCAN_DISABLE;
-	hadc1.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
-	hadc1.Init.LowPowerAutoWait = DISABLE;
-	hadc1.Init.LowPowerAutoPowerOff = DISABLE;
-	hadc1.Init.ContinuousConvMode = DISABLE;
-	hadc1.Init.NbrOfConversion = 1;
-	hadc1.Init.DiscontinuousConvMode = DISABLE;
-	hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START;
-	hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
-	hadc1.Init.DMAContinuousRequests = DISABLE;
-	hadc1.Init.Overrun = ADC_OVR_DATA_PRESERVED;
-	hadc1.Init.SamplingTimeCommon1 = ADC_SAMPLETIME_19CYCLES_5;
-	hadc1.Init.SamplingTimeCommon2 = ADC_SAMPLETIME_19CYCLES_5;
-	hadc1.Init.OversamplingMode = DISABLE;
-	hadc1.Init.TriggerFrequencyMode = ADC_TRIGGER_FREQ_HIGH;
-	if (HAL_ADC_Init(&hadc1) != HAL_OK)
+	else // FirstUpperLimitOfPercent < 200
 	{
-	  Error_Handler();
+		FinalUpperLimitOfPercent = MappingTableSetting_UsingTwoSlope(slope);
 	}
+}
 
-	for(uint8_t j=0; j<set; j++)
+uint8_t MappingTableSetting_UsingOneSlope(double slope)
+{
+	uint8_t catchFlag = 0, tempUpperLimitOfPercent = 0;
+
+	for (int i = 0; i < 256; i++)
 	{
-		// num만큼의 배열 클리어
-		for(uint8_t i=0; i<num; i++)
-		{
-			AMP_LED_X_Value[i] = 0;
-			AMP_LED_O_Value[i] = 0;
-			AMP_total_Value[i] = 0;
-		}
+	    double value = 200 + (slope * i);
+	    if (value > 65535.0)
+	        value = 65535.0;
+	    else if (value < 0.0)
+	        value = 0.0;
 
-		// OPAMP 설정 및 시작
-		hopamp1.Init.Mode = OPAMP_PGA_MODE;                     // OPAMP를 내부 PGA 모드로 설정
-		if(gain == 2){hopamp1.Init.PgaGain = OPAMP_PGA_GAIN_2; }
-		else if(gain == 4){hopamp1.Init.PgaGain = OPAMP_PGA_GAIN_4; }
-		else if(gain == 8){hopamp1.Init.PgaGain = OPAMP_PGA_GAIN_8; }
-		else if(gain == 16){hopamp1.Init.PgaGain = OPAMP_PGA_GAIN_16; }
-		else	{ Error_Handler(); }
-		hopamp1.Init.InvertingInput = OPAMP_INVERTINGINPUT_CONNECT_NO;  // 반전 입력 없음
-		hopamp1.Init.NonInvertingInput = OPAMP_NONINVERTINGINPUT_IO0;   // 비반전 입력을 VINP에 연결
-
-		if (HAL_OPAMP_Init(&hopamp1) != HAL_OK)
-		{
-		   Error_Handler();
-		}
-		if (HAL_OPAMP_Start(&hopamp1) != HAL_OK)
-		{
-		   Error_Handler();
-		}
-
-		// OPAMP 사용 후 ADC 변환
-		sConfig.Channel = ADC_CHANNEL_7; // OPAMP 출력과 연결된 ADC 채널
-		sConfig.Rank = ADC_REGULAR_RANK_1;
-		sConfig.SamplingTime = ADC_SAMPLINGTIME_COMMON_1;
-		if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
-		{
-		   Error_Handler();
-		}
-		/* ADC, OPAMP CONFIG END */
-
-	/* Set만큼 ADC START */
-		/* LED OFF 상태에서의 ADC */
-
-	   // ADC 보정 (필요 시)
-		if (HAL_ADCEx_Calibration_Start(&hadc1) != HAL_OK) {
-			Error_Handler();
-		}
-
-		// dark current adc read
-		for(uint8_t i=0; i<num; i++)
-		{
-			// ADC 변환 시작 및 값 읽기
-			HAL_ADC_Start(&hadc1);
-			if (HAL_ADC_PollForConversion(&hadc1, 10) != HAL_OK)
-			{
-				Error_Handler();
-			}
-			AMP_LED_X_Value[i] = HAL_ADC_GetValue(&hadc1);
-			HAL_ADC_Stop(&hadc1);
-		}
-
-		uint32_t tempVal_ADC_Calculation = 0;
-		// num만큼 읽은 값들의 평균을 set만큼 AVG 배열에 저장
-		for(uint8_t i=0; i<num; i++)
-		{
-			tempVal_ADC_Calculation += AMP_LED_X_Value[i];
-		}
-		AMP_LED_X_Value_AVG[j] = (uint16_t)(tempVal_ADC_Calculation / num);
-		tempVal_ADC_Calculation = 0;
-
-		/* LED ON 상태에서의 ADC */
-		// DAC 기능을 사용하여 LED를 ON
-		uint32_t dac_value = (uint32_t)(volt * 4095.0f / 3.0f);
-		HAL_DAC_SetValue(&hdac1, DAC_CHANNEL_1, DAC_ALIGN_12B_R, dac_value);
-		HAL_DAC_Start(&hdac1, DAC_CHANNEL_1);
-		HAL_Delay(5);
-//		PhotoStatus = CheckLED_IsShortOrOpen();
-//
-//		if(PhotoStatus != 0x40)
-//		{
-//			HAL_OPAMP_Stop(&hopamp1);
-//			HAL_DAC_Stop(&hdac1, DAC_CHANNEL_1);
-//			/* 아래 코드 실행 x, for(uint8_t j=0; j<set; j++)의 다음 인덱스를 실행*/
-//			continue;
-//		}
-
-		// LED ON ADC READ
-		for(uint8_t i=0; i<num; i++)
-		{
-			// ADC 변환 시작 및 값 읽기
-			HAL_ADC_Start(&hadc1);
-			if (HAL_ADC_PollForConversion(&hadc1, 10) != HAL_OK)
-			{
-			  Error_Handler();
-			}
-			AMP_LED_O_Value[i] = HAL_ADC_GetValue(&hadc1);
-			HAL_ADC_Stop(&hadc1);
-		}
-		HAL_OPAMP_Stop(&hopamp1);
-		HAL_DAC_Stop(&hdac1, DAC_CHANNEL_1);
-
-		// num만큼 읽은 값들의 평균을 set만큼 AVG 배열에 저장
-		for(uint8_t i=0; i<num; i++)
-		{
-			tempVal_ADC_Calculation += AMP_LED_O_Value[i];
-			if(AMP_LED_O_Value[i] >= AMP_LED_X_Value[i])
-			{
-				AMP_total_Value[i] = AMP_LED_O_Value[i] - AMP_LED_X_Value[i];
-			}
-			else
-			{
-				AMP_total_Value[i] = 0;
-			}
-		}
-		AMP_LED_O_Value_AVG[j] = (uint16_t)(tempVal_ADC_Calculation / num);
-		if(AMP_LED_O_Value_AVG[j] >= AMP_LED_X_Value_AVG[j])
-		{
-			AMP_total_Value_AVG[j] = AMP_LED_O_Value_AVG[j] - AMP_LED_X_Value_AVG[j];
-		}
-		else
-		{
-			AMP_total_Value_AVG[j] = 0;
-		}
+	    // 4000 건들지 않기, 이게 SMOKE 프로그램 썼을 때 표시했던 값의 기준임, 4000이 적정이고 나중에 농도 표시할 땐 4090으로 썼음
+	    if((catchFlag == 0) && (value >= 4000))
+	    {
+	    	tempUpperLimitOfPercent = i;
+	    	catchFlag = 1;
+	    }
+	    AdcToPercent_MappingTable[i] = value;  // double 배열에 바로 저장
 	}
 
-	Ana_photo_X_Sen_12bit = 0, Ana_photo_O_Sen_12bit = 0;
-	uint32_t tempVal_AVG_LED_O = 0, tempVal_AVG_LED_X = 0;
 
-	for(uint8_t i=0; i<set; i++)
+	if(catchFlag == 0)
 	{
-		tempVal_AVG_LED_X += AMP_LED_X_Value_AVG[i];
-		tempVal_AVG_LED_O += AMP_LED_O_Value_AVG[i];
+		/* 만약 255까지 다 돌았는데도 catchFlag가 활성화되지 않았다면
+		 * 매핑테이블 안의 값이 다 4000 이하라 25.5% 이하에서 saturation될 일이 없다는 뜻이므로
+		 * UpperLimitOfPercent를 255로 표시 */
+
+		tempUpperLimitOfPercent = 255;
+    	catchFlag = 1;
 	}
-	Ana_photo_X_Sen_12bit = (uint16_t)(tempVal_AVG_LED_X / set);
-	Ana_photo_O_Sen_12bit = (uint16_t)(tempVal_AVG_LED_O / set);
 
-//	if(Ana_photo_X_Sen_12bit == Ana_photo_O_Sen_12bit)
-//	{
-//		HAL_DAC_Start(&hdac1, DAC_CHANNEL_1);
-//		uint32_t dac_value = (uint32_t)(volt * 4095.0f / 3.3f);
-//		HAL_DAC_SetValue(&hdac1, DAC_CHANNEL_1, DAC_ALIGN_12B_R, dac_value);
-//		HAL_Delay(5);
-//		PhotoStatus = CheckLED_IsShortOrOpen();
-//
-//		HAL_DAC_Stop(&hdac1, DAC_CHANNEL_1);
-//
-//		if(PhotoStatus != 0x40)
-//		{
-//
-//		}
-//	}
+	return tempUpperLimitOfPercent;
+}
 
-	int32_t PhotoSensorVal = 0;
-	PhotoSensorVal = Ana_photo_O_Sen_12bit - Ana_photo_X_Sen_12bit + Adjust_Y_Intercept_Value;
-	if(PhotoSensorVal < 0)
+uint8_t MappingTableSetting_UsingTwoSlope(double slope)
+{
+	uint8_t UserAdjustedPercent = FinalPcntVal_Required4SlopeCalculation;
+	uint16_t UserAdjustedAdcValue = photoADC_Required4SlopeCalculation + 200;
+	uint32_t StartingToSaturate_AdcValue = 4090 - Ana_photo_X_Sen_12bit + Adjust_Y_Intercept_Value;
+	uint8_t StartingToSaturate_TargetPercentageIs = 200;
+
+	for (int i = 0; i < UserAdjustedPercent; i++)
 	{
-		PhotoSensorVal = 0;
+	    double value = 200 + (slope * i);
+	    if (value > 65535.0)
+	        value = 65535.0;
+	    else if (value < 0.0)
+	        value = 0.0;
+
+	    AdcToPercent_MappingTable[i] = value;  // double 배열에 바로 저장
 	}
-	return (uint16_t)PhotoSensorVal;
+
+	// 여기서부터는 사용자가 세팅한 농도부터 200까지 adc값 채워넣어야됨
+	// 이 때 사용할 기울기는 (UserAdjustedAdcValue, UserAdjustedPercent), (StartingToSaturate_AdcValue, StartingToSaturate_TargetPercentageIs) 두 점을 지나는 직선의 기울기어야 함.
+	// 분자(numerator)	 : StartingToSaturate_AdcValue - UserAdjustedAdcValue
+	// 분모(denominator)	 : StartingToSaturate_TargetPercentageIs - UserAdjustedPercent
+
+	uint8_t catchFlag = 0, tempUpperLimitOfPercent = 0;
+	double SecondSlope, numerator, denominator;
+	numerator = (double)StartingToSaturate_AdcValue - (double)UserAdjustedAdcValue;
+	denominator = (double)StartingToSaturate_TargetPercentageIs - (double)UserAdjustedPercent;
+	SecondSlope = numerator / denominator;
+
+	for (int i = 0; i < 256-UserAdjustedPercent; i++)
+	{
+	    double value = UserAdjustedAdcValue + (SecondSlope * i);
+	    if (value > 65535.0)
+	        value = 65535.0;
+	    else if (value < 0.0)
+	        value = 0.0;
+
+	    if((catchFlag == 0) && (value >= StartingToSaturate_AdcValue))
+	    {
+	    	tempUpperLimitOfPercent = UserAdjustedPercent+i;
+	    	catchFlag = 1;
+	    }
+	    AdcToPercent_MappingTable[UserAdjustedPercent+i] = value;  // double 배열에 바로 저장
+	}
+	return tempUpperLimitOfPercent;
 }
 
 uint8_t MatchAdcValueToPercentValue(const double *arr, uint16_t ADCValue)
@@ -571,12 +427,11 @@ uint8_t MatchAdcValueToPercentValue(const double *arr, uint16_t ADCValue)
 	uint8_t low = 0;
 	uint8_t high = 255;
 
-    if (ADCValue <= arr[0]) {
+	if(ADCValue == 0){
+		return 0;
+	}
+    else if (ADCValue <= arr[0]) {
         return 0; // 최저값 아래일 경우 0 반환
-    }
-    else if(ADCValue == 0)
-    {
-    	return 0;
     }
     else if (ADCValue >= arr[255]) {
         return 255; // 최대값 초과일 경우 255 반환
@@ -606,34 +461,6 @@ uint8_t MatchAdcValueToPercentValue(const double *arr, uint16_t ADCValue)
 	return closestIndex;
 }
 
-void RedefineSmokeTableWithADC(uint8_t ReferenceArr, double slope)
-{
-    if(ReferenceArr == UpTo22)
-    {
-    	for (int i = 0; i < 256; i++) {
-    	    double value = 200 + (slope * i);
-    	    if (value > 65535.0)
-    	        value = 65535.0;
-    	    else if (value < 0.0)
-    	        value = 0.0;
-
-    	    ADCMappingTable_Below22Percent[i] = value;  // double 배열에 바로 저장
-    	}
-    }
-//    else if(ReferenceArr == PGA2_Above20)
-//    {
-//    	for (int i = 0; i < 256; i++) {
-//    	    double value = (double)Adjust_Y_Intercept_Value + (slope * (double)i);
-//    	    if (value > 65535.0)
-//    	        value = 65535.0;
-//    	    else if (value < 0.0)
-//    	        value = 0.0;
-//
-//            ADCMappingTable_Above22Percent[i] = value;
-//        }
-//    }
-}
-
 uint8_t firstCalibration(uint8_t pga)
 {/*
  * 0. 사용자가 영점 조정 버튼 누름
@@ -653,11 +480,12 @@ uint8_t firstCalibration(uint8_t pga)
 	 * #define cal1_addr_size 10 // firstCalibration
 		uint8_t cal1_adc_delta_crit = 100; // ADC 값의 현재-이전 값 차이 기준(Criteria)
 		uint16_t cal1_led_x_adc,
-		cal1_led_o_adc_2p2_1p3[cal1_addr_size] = {0,}, /\* 2.2V ~ 1.3V 범위 관련 LED O ADC 값 *\/
+		cal1_led_o_adc_2p15_1p3_interval0p5[cal1_addr_size] = {0,}, /\* 2.2V ~ 1.3V 범위 관련 LED O ADC 값 *\/
 		cal1_calc_adc[cal1_addr_size] = {0};       // 첫 번째 보정에서 계산된 ADC 값
 	 */
 
-	uint8_t pga_setting_changeTo8 = 0;
+	ANAL_RED_LED(LED_OFF);
+	uint8_t pga_setting_success = 0;
 
 	ADC_ChannelConfTypeDef sConfig = {0};
 
@@ -666,7 +494,7 @@ uint8_t firstCalibration(uint8_t pga)
 	// OPAMP를 내부 PGA 모드로 설정
 //	if(pga == 2){hopamp1.Init.PgaGain = OPAMP_PGA_GAIN_2; }
 //	else
-	if(pga == 4){hopamp1.Init.PgaGain = OPAMP_PGA_GAIN_4; }
+		if(pga == 4){hopamp1.Init.PgaGain = OPAMP_PGA_GAIN_4; }
 	else if(pga == 8){hopamp1.Init.PgaGain = OPAMP_PGA_GAIN_8; }
 //	else if(pga == 16){hopamp1.Init.PgaGain = OPAMP_PGA_GAIN_16; }
 	else	{ Error_Handler(); }
@@ -691,24 +519,36 @@ uint8_t firstCalibration(uint8_t pga)
 	{
 	   Error_Handler();
 	}
+	HAL_Delay(5);
 
 	/* 1-1. DAC를 켜지 않은 상태에서 ADC 30번 진행한 것의 평균값 1개 리턴 */
 	cal1_led_x_adc = LED_X_ADC_VALUE(&hadc1, 30);
 
 
-	/* 1-2. DAC를 켠 상태에서 ADC 30번 진행한 것의 평균값 1개 리턴하는 작업을 DAC 2.2부터 0.1씩 감소하며 1.0까지 총 13번 진행 */
-	float DacVolt = 2.2;
-	for(uint8_t i=0; i<13; i++)
+	/* 1-2. DAC를 켠 상태에서 ADC 30번 진행한 것의 평균값 1개 리턴하는 작업을 DAC 2.5부터 0.05씩 감소하며 1.3까지 총 cal1_addr_size번 진행 */
+	for(uint8_t i=0; i<cal1_addr_size; i++)
 	{
-		cal1_led_o_adc_2p2_1p3[i] = LED_O_ADC_VALUE(&hadc1, DacVolt, 30);
-		DacVolt -= 0.1;
+		cal1_led_o_adc_2p15_1p3_interval0p5[i] = 0;
+	}
+
+	float DacVolt = 2.15;
+	for(uint8_t i=0; i<cal1_addr_size; i++)
+	{
+		cal1_led_o_adc_2p15_1p3_interval0p5[i] = LED_O_ADC_VALUE(&hadc1, DacVolt, 30);
+		DacVolt -= 0.05;
+	}
+
+	if (HAL_OPAMP_Stop(&hopamp1) != HAL_OK)
+	{
+	   Error_Handler();
+	   // 계속 진행할지, 오류를 반환할지 결정
 	}
 
 
 	/* 1-3. (DAC 각 구간에서의 ADC 30회 평균값 - DAC를 안켜고 ADC한 값) 각각 계산된 값을 크기가 10인 배열에 저장 */
-	for(uint8_t i=0; i<13; i++)
+	for(uint8_t i=0; i<cal1_addr_size; i++)
 	{
-		cal1_calc_adc[i] = cal1_led_o_adc_2p2_1p3[i] - cal1_led_x_adc;
+		cal1_calc_adc[i] = cal1_led_o_adc_2p15_1p3_interval0p5[i] - cal1_led_x_adc;
 	}
 
 
@@ -721,27 +561,27 @@ uint8_t firstCalibration(uint8_t pga)
 
 	uint8_t i=1, breakFlag = 0;
 	cal1_adc_delta[0] = cal1_calc_adc[0] - 0;
-	for(i=1; i<13; i++)
+	for(i=1; i<cal1_addr_size; i++)
 	{
 		cal1_adc_delta[i] = cal1_calc_adc[i] - cal1_calc_adc[i-1];
 	}
-	for(i=0; i<13; i++)
+	for(i=0; i<cal1_addr_size; i++)
 	{
 		if(cal1_adc_delta[i] >= 100)
 		{
 			breakFlag = 1;
-			pga_setting_changeTo8 = 0;
 			break;
 		}
 	}
 	if(breakFlag == 1)
 	{
 		saveDACvalueInFlash(i, pga);
+		pga_setting_success = 1;
 		breakFlag = 0;
 	}
 	else
 	{
-		for(i=0; i<13; i++)
+		for(i=0; i<cal1_addr_size; i++)
 		{
 			if(cal1_adc_delta[i] >= 50)
 			{
@@ -752,88 +592,77 @@ uint8_t firstCalibration(uint8_t pga)
 		if(breakFlag == 1)
 		{
 			saveDACvalueInFlash(i, pga);
+			pga_setting_success = 1;
 			breakFlag = 0;
 		}
 		else
 		{
-			pga_setting_changeTo8 = 1;
-			if((pga == 8) && (pga_setting_changeTo8 == 1))
-			{
-				ANAL_RED_LED(LED_ON);
-			}
+			pga_setting_success = 0;
 		}
 	}
-
-	// OPAMP 사용 후 중지 (선택 사항)
-	if (HAL_OPAMP_Stop(&hopamp1) != HAL_OK)
-	{
-	   Error_Handler();
-	   // 계속 진행할지, 오류를 반환할지 결정
-	}
-	return pga_setting_changeTo8;
-}
-
-void ZeroAdjustment(void)
-{ // (LED o ADC 값 - LED x ADC 값)이 200이 되도록 y절편 보정값을 계산
-	/* 시료 별 편차를 맞추기 위함
-	 * 최종 adc 값 계산해서, 그게 200이 되도록 해야 함. => 최종 adc 값 + y절편 보정값 = 200
-	 * "y절편 보정값"이라는 변수에 값을 저장하는데,
-	 * 200보다 작으면 그만큼 더해줘야 하니까 200-보정값
-	 * 200보다 크면 200에 맞춰야 하니까 200-보정값 해서 <- 이 때의 최종 보정 값은 음수가 되는 것이 맞음
-	 */
-
-	Adjust_Y_Intercept_Value = 200 - (Ana_photo_O_Sen_12bit - Ana_photo_X_Sen_12bit);
-
-    Flash_Erase(Adjust_Y_Intercept_ADDR);
-    Flash_Write_int16(Adjust_Y_Intercept_ADDR, Adjust_Y_Intercept_Value);
-    Flash_Read_int16(Adjust_Y_Intercept_ADDR, &Adjust_Y_Intercept_Value);
+	return pga_setting_success;
 }
 
 void saveDACvalueInFlash(uint8_t index, uint8_t pga)
 {
 	ANAL_RED_LED(LED_ON);
 
-	uint8_t DAC_multiplied_10 = 0;
+	uint8_t DAC_multiplied_100 = 0;
 	switch(index)
 	{
 	case 0:
-		DAC_multiplied_10 = 22;
+		DAC_multiplied_100 = 215;
 		break;
 	case 1:
-		DAC_multiplied_10 = 21;
+		DAC_multiplied_100 = 210;
 		break;
 	case 2:
-		DAC_multiplied_10 = 20;
+		DAC_multiplied_100 = 205;
 		break;
 	case 3:
-		DAC_multiplied_10 = 19;
+		DAC_multiplied_100 = 200;
 		break;
 	case 4:
-		DAC_multiplied_10 = 18;
+		DAC_multiplied_100 = 195;
 		break;
 	case 5:
-		DAC_multiplied_10 = 17;
+		DAC_multiplied_100 = 190;
 		break;
 	case 6:
-		DAC_multiplied_10 = 16;
+		DAC_multiplied_100 = 185;
 		break;
 	case 7:
-		DAC_multiplied_10 = 15;
+		DAC_multiplied_100 = 180;
 		break;
 	case 8:
-		DAC_multiplied_10 = 14;
+		DAC_multiplied_100 = 175;
 		break;
 	case 9:
-		DAC_multiplied_10 = 13;
+		DAC_multiplied_100 = 170;
 		break;
 	case 10:
-		DAC_multiplied_10 = 12;
+		DAC_multiplied_100 = 165;
 		break;
 	case 11:
-		DAC_multiplied_10 = 11;
+		DAC_multiplied_100 = 160;
 		break;
 	case 12:
-		DAC_multiplied_10 = 10;
+		DAC_multiplied_100 = 155;
+		break;
+	case 13:
+		DAC_multiplied_100 = 150;
+		break;
+	case 14:
+		DAC_multiplied_100 = 145;
+		break;
+	case 15:
+		DAC_multiplied_100 = 140;
+		break;
+	case 16:
+		DAC_multiplied_100 = 135;
+		break;
+	case 17:
+		DAC_multiplied_100 = 130;
 		break;
 	}
 
@@ -841,15 +670,31 @@ void saveDACvalueInFlash(uint8_t index, uint8_t pga)
 	Flash_Write_uint8(SMOKE_PGA_ADDR, pga);
 	Flash_Read_uint8(SMOKE_PGA_ADDR, &PGA);
 
-	Flash_Erase(SMOKE_DAC_Multiplied_10_ADDR);
-	Flash_Write_uint8(SMOKE_DAC_Multiplied_10_ADDR, DAC_multiplied_10);
-	Flash_Read_uint8(SMOKE_DAC_Multiplied_10_ADDR, &DAC_10multiplied);
-	DAC_VALUE = DAC_10multiplied * 0.1;
+	Flash_Erase(SMOKE_DAC_Multiplied_100_ADDR);
+	Flash_Write_uint8(SMOKE_DAC_Multiplied_100_ADDR, DAC_multiplied_100);
+	Flash_Read_uint8(SMOKE_DAC_Multiplied_100_ADDR, &DAC_multiplied_100);
+	DAC_VALUE = DAC_multiplied_100 * 0.01;
 
-	Ana_photo_X_Sen_12bit = LED_X_ADC_VALUE(&hadc1, 30);
-	Ana_photo_O_Sen_12bit = LED_O_ADC_VALUE(&hadc1, DAC_VALUE, 30);
+	Ana_photo_Sen_12bit = Return_Ana_photo_Sen_12bit(PGA, DAC_VALUE, 30);
 
-	ZeroAdjustment();
+    Flash_Erase(LED_X_ADC_Value_ADDR);
+    Flash_Write_uint16(LED_X_ADC_Value_ADDR, Ana_photo_X_Sen_12bit);
+    Flash_Read_uint16(LED_X_ADC_Value_ADDR, &Flash_Ana_photo_X_Sen_12bit);
+
+
+
+	// (LED O ADC 값 - LED X ADC 값)이 200이 되도록 y절편 보정값을 계산
+	/* 시료 별 편차를 맞추기 위함
+	 * 최종 adc 값 계산해서, 그게 200이 되도록 해야 함. => 최종 adc 값 + y절편 보정값 = 200
+	 * "y절편 보정값"이라는 변수에 값을 저장하는데,
+	 * 200보다 작으면 그만큼 더해줘야 하니까 200-보정값
+	 * 200보다 크면 200에 맞춰야 하니까 200-보정값 해서 <- 이 때의 최종 보정 값은 음수가 되는 것이 맞음
+	 */
+	Adjust_Y_Intercept_Value = 200 - (Ana_photo_O_Sen_12bit - Ana_photo_X_Sen_12bit);
+
+    Flash_Erase(Adjust_Y_Intercept_ADDR);
+    Flash_Write_int16(Adjust_Y_Intercept_ADDR, Adjust_Y_Intercept_Value);
+    Flash_Read_int16(Adjust_Y_Intercept_ADDR, &Adjust_Y_Intercept_Value);
 
 	ANAL_RED_LED(LED_OFF);
 }
@@ -858,67 +703,61 @@ void AdjustmentCmdPrcessing(uint8_t cmd)
 {
 	if(cmd == 0xCA)
 	{
-//		ZeroAdjustment();
-		uint8_t pga_setting_changeTo8 = 0;
-		pga_setting_changeTo8 = firstCalibration(4);
-		if(pga_setting_changeTo8 == 0)
-		{
-			return;
-		}
-		else
-		{
-			pga_setting_changeTo8 = firstCalibration(8);
-			return;
-		}
-	}
+		uint8_t pga_setting_value = 0, cnt = 0;
 
-	Read_Analog_ADC();
-
-	if((FinalPcntVal_Required4SlopeCalculation <= 250) && (FinalPcntVal_Required4SlopeCalculation >= -150))
-	{
-		if(cmd == 0xCD) // 5, 10, 15, 20% button
+		while(pga_setting_value != 1)
 		{
-			Is0xCdCmdReceived = 1;
-			UserAdjustedPercent = 0;
-
-			if(UART_RX_buf[3] == 0x10)
+			if(cnt < 5)
 			{
-				UserAdjustedPercent = 100;
+				pga_setting_value = firstCalibration(4);
 			}
-			else if(UART_RX_buf[3] == 0x13)
+			else if(cnt < 10)
 			{
-				UserAdjustedPercent = 130;
+				pga_setting_value = firstCalibration(8);
 			}
 			else
 			{
-				UserAdjustedPercent = UART_RX_buf[3];
+				break;
 			}
+			cnt ++;
+		}
+		if(pga_setting_value != 1)
+		{
+			ANAL_RED_LED(LED_ON);
+		}
+	}
+	else
+	{
+		Read_Analog_ADC();
+
+		if(cmd == 0xCD) // 5, 10, 15, 20% button
+		{
+			UserAdjustedPercent = UART_RX_buf[3];
 		}
 		else
 		{
-			if((Is0xCdCmdReceived == 1) && (UserAdjustedPercent != 0))
+			UserAdjustedPercent = ReturnPercent;
+
+			if(cmd == 0xCB) // xx.0 +,-
 			{
-				if(cmd == 0xCB) // xx.0 +,-
+				if (UART_RX_buf[3] == 0x01) // -
 				{
-					if (UART_RX_buf[3] == 0x01) // -
-					{
-						UserAdjustedPercent -= 10;
-					}
-					else if (UART_RX_buf[3] == 0x02) // +
-					{
-						UserAdjustedPercent += 10;
-					}
+					UserAdjustedPercent -= 10;
 				}
-				else if(cmd == 0xCC) // 0.x +,-
+				else if (UART_RX_buf[3] == 0x02) // +
 				{
-					if (UART_RX_buf[3] == 0x01) // -
-					{
-						UserAdjustedPercent -= 1;
-					}
-					else if (UART_RX_buf[3] == 0x02) // +
-					{
-						UserAdjustedPercent += 1;
-					}
+					UserAdjustedPercent += 10;
+				}
+			}
+			else if(cmd == 0xCC) // 0.x +,-
+			{
+				if (UART_RX_buf[3] == 0x01) // -
+				{
+					UserAdjustedPercent -= 1;
+				}
+				else if (UART_RX_buf[3] == 0x02) // +
+				{
+					UserAdjustedPercent += 1;
 				}
 			}
 		}
@@ -928,9 +767,10 @@ void AdjustmentCmdPrcessing(uint8_t cmd)
 			UserAdjustedPercent = 0;
 		}
 
+		Ana_photo_Sen_12bit = Return_Ana_photo_Sen_12bit(PGA, DAC_VALUE, 30);
 
 		// 분자
-		if(Ana_photo_Sen_12bit >= 200)
+		if(Ana_photo_Sen_12bit > 200)
 		{
 			photoADC_Required4SlopeCalculation = Ana_photo_Sen_12bit - 200;
 		}
@@ -945,7 +785,7 @@ void AdjustmentCmdPrcessing(uint8_t cmd)
 
 
 		// 분모
-		if(UserAdjustedPercent != 0)
+		if((UserAdjustedPercent >= 100) && (UserAdjustedPercent <= 160))
 		{
 			FinalPcntVal_Required4SlopeCalculation = UserAdjustedPercent;
 		}
@@ -971,6 +811,6 @@ void AdjustmentCmdPrcessing(uint8_t cmd)
 		{
 			RedefinedSlope = (double)photoADC_Required4SlopeCalculation / (double)FinalPcntVal_Required4SlopeCalculation;
 		}
-		RedefineSmokeTableWithADC(UpTo22, RedefinedSlope);
+		RedefineSmokeTableWithADC(RedefinedSlope);
 	}
 }

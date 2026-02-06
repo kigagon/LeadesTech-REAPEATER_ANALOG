@@ -13,16 +13,16 @@
 extern ADC_HandleTypeDef hadc1;
 extern DAC_HandleTypeDef hdac1;
 extern OPAMP_HandleTypeDef hopamp1;
-
 //extern INA219_t ina219;
 extern I2C_HandleTypeDef hi2c1;
-extern uint8_t ReturnPercent;
-extern uint8_t PGA;
-extern float DAC_Volt;
+
+extern uint16_t Ana_Temp_Sen;
+extern uint8_t Ana_Temp_Sen_Com, Ana_Temp_Sen_Com_Tmp;
+extern float temperature_calibrationVal;
 
 void Run_Analoge_Mode(void);
+extern void ANAL_RED_LED(uint8_t OnOff);
 void ANAL_BLUE_LED(uint8_t OnOff);
-void ANAL_RED_LED(uint8_t OnOff);
 void ANAL_IN_Set(void);
 void ANAL_IN_ReSet(void);
 void ANAL_OUT_Set(void);

@@ -176,6 +176,7 @@ extern OPAMP_HandleTypeDef hopamp1;
 #define Isolation_Address	254
 #define Test_Address		250
 
+#define LED_TOGGLE  2
 #define LED_ON 		1
 #define LED_OFF 	0
 
@@ -319,15 +320,9 @@ extern uint8_t Ana_Out_ISO_Mode;
 extern uint8_t Ana_In_ISO_Pre_Mode;
 extern uint8_t Ana_In_ISO_Mode;
 
-extern int Ana_Temp_Sen;
-extern uint8_t Ana_Temp_Sen_Com, Ana_Temp_Sen_Com_Tmp;
-extern float temperature_calibrationVal;
 extern uint8_t Ana_Led_Com_mode, Ana_Led_Fire_Mode;
 
 extern int Ana_Smoke_Sen, Ana_Smoke_OpAmp;
-extern uint16_t Ana_photo_O_Sen_12bit, Ana_photo_X_Sen_12bit, Ana_photo_Sen_12bit;
-extern uint16_t photoADC_Required4SlopeCalculation;
-extern int16_t UserAdjustedPercent;
 extern uint8_t returnPercent;
 extern float DAC_Volt;
 extern uint8_t CurrentlyDisplayedPercent, DisplayedPercent_Required4SlopeCalculation;

@@ -130,17 +130,11 @@ uint8_t Ana_Out_ISO_Mode;
 uint8_t Ana_In_ISO_Pre_Mode;
 uint8_t Ana_In_ISO_Mode;
 
-int Ana_Temp_Sen;
-uint8_t Ana_Temp_Sen_Com, Ana_Temp_Sen_Com_Tmp;
-float temperature_calibrationVal;
 uint8_t Ana_Led_Com_mode , Ana_Led_Fire_Mode;
 uint8_t Ana_Com_Led_mode , Fire_Mode;
 
 int Ana_Smoke_Sen, Ana_Smoke_OpAmp;
-uint16_t Ana_photo_O_Sen_12bit, Ana_photo_X_Sen_12bit, Ana_photo_Sen_12bit; // O,X : IsLedOn?
 uint8_t scaledValue = 0;
-uint16_t photoADC_Required4SlopeCalculation = 0;
-int16_t UserAdjustedPercent = 0;
 
 float DAC_Volt;
 

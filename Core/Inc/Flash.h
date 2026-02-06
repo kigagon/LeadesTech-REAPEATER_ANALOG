@@ -2,17 +2,20 @@
 #ifndef FLASH_H_
 #define FLASH_H_
 
-extern uint32_t Waterproof_Temperature_ADDR;
 //extern uint32_t shunt_Current_ADDR;
-extern uint32_t photoADC_Required4SlopeCalculation_ADDR;
+extern uint32_t Waterproof_Temperature_ADDR;
 extern uint32_t Adjust_Y_Intercept_ADDR;
+extern uint32_t LED_X_ADC_Value_ADDR;
 extern uint32_t FinalPcntVal_Required4SlopeCalculation_ADDR;
-extern uint32_t SMOKE_DAC_Multiplied_10_ADDR;
+extern uint32_t photoADC_Required4SlopeCalculation_ADDR;
+extern uint32_t SMOKE_DAC_Multiplied_100_ADDR;
 extern uint32_t SMOKE_PGA_ADDR;
 
 extern uint32_t ISO_STATUS_ADDR;
 
+extern void Flash_EraseAt(uint32_t FlashAddress, uint32_t length);
 void Flash_Erase(uint32_t address);
+uint8_t Flash_IsErased(uint32_t startAddr, uint32_t length);
 
 void Flash_Write_uint8(uint32_t address, uint8_t value);
 void Flash_Write_uint16(uint32_t address, uint16_t value);

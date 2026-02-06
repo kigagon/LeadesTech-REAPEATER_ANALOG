@@ -13,8 +13,6 @@
 #include "INA219.h"
 #include "flash.h"
 #include <stdio.h>
-#include <stdbool.h>
-//#include <math.h>
 
 /****************ISO Start****************/
 #include "function_Analog_ISO.h"
@@ -32,11 +30,15 @@ uint16_t Temprature_Table[100] = {3754,3739,3723,3706,3687,3666,3648,3629,3608,3
 								1204,1179,1153,1126,1100,1072,1049,1026,1002,978,
 								954,933,912,890,869,847,828,809,790,771};
 
-uint8_t ReturnPercent = 0;
-uint8_t PGA;
-
 double current_Avr[31] = {0};
 double Current_Value[110] = {0};
+
+uint16_t Ana_Temp_Sen;
+uint8_t Ana_Temp_Sen_Com, Ana_Temp_Sen_Com_Tmp;
+float temperature_calibrationVal;
+
+uint16_t result1, result2;
+INA219_t ina219_1;
 
 void Run_Analoge_Mode(void){
 
@@ -83,81 +85,7 @@ void Run_Analoge_Mode(void){
 
 	if(ANALOG_MODE == SMOKE)
 	{
-		//ANAL_BLUE_LED(LED_ON);
-
-		if(Analog_Address == 0xFF)
-		{
-			Flash_Erase(Adjust_Y_Intercept_ADDR);
-			Flash_Write_int16(Adjust_Y_Intercept_ADDR, 0);
-			Flash_Erase(FinalPcntVal_Required4SlopeCalculation_ADDR);
-			Flash_Write_uint8(FinalPcntVal_Required4SlopeCalculation_ADDR, 0);
-			Flash_Erase(photoADC_Required4SlopeCalculation_ADDR);
-			Flash_Write_uint16(photoADC_Required4SlopeCalculation_ADDR, 0);
-			RedefinedSlope = 17.36;
-		}
-		else
-		{
-			Flash_Read_int16(Adjust_Y_Intercept_ADDR, &Adjust_Y_Intercept_Value);
-			Flash_Read_uint8(FinalPcntVal_Required4SlopeCalculation_ADDR, &FinalPcntVal_Required4SlopeCalculation);
-			Flash_Read_uint16(photoADC_Required4SlopeCalculation_ADDR, &photoADC_Required4SlopeCalculation);
-
-			if(Adjust_Y_Intercept_Value == -1)
-			{
-			    Flash_Erase(Adjust_Y_Intercept_ADDR);
-			    Flash_Write_int16(Adjust_Y_Intercept_ADDR, 0);
-			    Flash_Read_int16(Adjust_Y_Intercept_ADDR, &Adjust_Y_Intercept_Value);
-			}
-			if(FinalPcntVal_Required4SlopeCalculation == 0xFF)
-			{
-				Flash_Erase(FinalPcntVal_Required4SlopeCalculation_ADDR);
-				Flash_Write_uint8(FinalPcntVal_Required4SlopeCalculation_ADDR, 0);
-				Flash_Read_uint8(FinalPcntVal_Required4SlopeCalculation_ADDR, &FinalPcntVal_Required4SlopeCalculation);
-			}
-			if(photoADC_Required4SlopeCalculation == 0xFFFF)
-			{
-				Flash_Erase(photoADC_Required4SlopeCalculation_ADDR);
-				Flash_Write_uint16(photoADC_Required4SlopeCalculation_ADDR, 0);
-				Flash_Read_uint16(photoADC_Required4SlopeCalculation_ADDR, &photoADC_Required4SlopeCalculation);
-			}
-
-			// 기울기 계산
-			if((photoADC_Required4SlopeCalculation == 0))
-			{
-				RedefinedSlope = 17.36;
-			}
-			else if(FinalPcntVal_Required4SlopeCalculation == 0)
-			{
-				RedefinedSlope = 17.36;
-			}
-			else
-			{
-				RedefinedSlope = (double)photoADC_Required4SlopeCalculation / (double)FinalPcntVal_Required4SlopeCalculation;
-			}
-			RedefineSmokeTableWithADC(UpTo22, RedefinedSlope);
-		}
-
-//		SetPGA(DAC_VALUE, 90);
-
-		Flash_Read_uint8(SMOKE_PGA_ADDR, &PGA);
-
-		if(PGA == 0xFF)
-		{
-			PGA = 4;
-		}
-
-		Flash_Read_uint8(SMOKE_DAC_Multiplied_10_ADDR, &DAC_10multiplied);
-
-		if(DAC_10multiplied == 0xFF)
-		{
-			DAC_VALUE = DAC_VALUE_TEMP;
-		}
-		else
-		{
-			DAC_VALUE = DAC_10multiplied * 0.1;
-		}
-//		firstCalibration(4);
-
-//		AverageCurrentValues();
+//		SetSMOKE();
 	}
 
 	else if(ANALOG_MODE == TEMPERATURE)
@@ -176,20 +104,34 @@ void Run_Analoge_Mode(void){
 		}
 	}
 
+//	AdjustmentCmdPrcessing(0xCA);
+//////
 //	while(1)
 //	{
 //		Read_Analog_ADC();
+//		HAL_Delay(100);
 //	}
-	Read_Analog_ADC();
+//	Read_Analog_ADC();
 
+
+
+	while(1){
+		result1 = Read16(&ina219_1, 0x00);
+		result2 = Read16(&ina219_1, 0x3E);
+	}
 	//LPUART2_UART_RE_Init(0, 9600);
 	while(1){
+
+ 		if(IfAddressMatched == 1)
+		{
+			Check_Com();
+			IfAddressMatched = 0;
+		}
 
 		if(ADDRESS_MODES == READ_ADDRESS)
 		{
 			///////////////Start reading address of board//////////////////
 			Analog_Address_tmp[7] =  ~(HAL_GPIO_ReadPin(a_DIP_ADD7_r_IN1_SIG_GPIO_Port, a_DIP_ADD7_r_IN1_SIG_Pin)) & 0x01;
-
 			Analog_Address_tmp[6] =  ~(HAL_GPIO_ReadPin(a_DIP_ADD6_r_CH1_SW_GPIO_Port, a_DIP_ADD6_r_CH1_SW_Pin)) & 0x01;
 			Analog_Address_tmp[5] =  ~(HAL_GPIO_ReadPin(a_DIP_ADD5_r_CH2_SW_GPIO_Port, a_DIP_ADD5_r_CH2_SW_Pin)) & 0x01;
 			Analog_Address_tmp[4] =  ~(HAL_GPIO_ReadPin(a_DIP_ADD4_r_CH3_SW_GPIO_Port, a_DIP_ADD4_r_CH3_SW_Pin)) & 0x01;
@@ -213,20 +155,12 @@ void Run_Analoge_Mode(void){
 	  // "Enable the UART Data Register not empty Interrupt" //
 	  __HAL_UART_ENABLE_IT(&hlpuart2, UART_IT_RXNE);
 
-//		Check_Uart_Rx();
+		if(IfAddressMatched == 1)
+		{
+			Check_Com();
+			IfAddressMatched = 0;
+		}
 
-//	  if(Set_Uart_Dir_Flash_Wr == 1){
-//		Flash_Erase(UART_DIR_ADDR);
-//		Flash_Write_uint8(UART_DIR_ADDR, Uart_DIR_Mode);
-//		Set_Uart_Dir_Flash_Wr = 0;
-//	  }
-
-//	  if(Set_Uart_Dir_Flash_Wr == 1){
-//		LPUART2_UART_RE_Init(Uart_DIR_Mode, UART_BAUDRATE);
-//		Set_Uart_Dir_Flash_Wr = 0;
-//	  }
-//
-//		Read_Analog_ADC();
 		if(ANALOG_MODE == TEMPERATURE)
 		{
 			Read_Analog_ADC();
@@ -236,17 +170,18 @@ void Run_Analoge_Mode(void){
 		{
 //			ANAL_RED_LED(LED_OFF); // HIGH
 			Check_Com();
-//			V_0to3_checkShuntCurrentValues();
 
 //			ANAL_RED_LED(LED_ON); // LOW
 			IfAddressMatched = 0;
 		}
 
-		//		if(ISO_MODE == ISO){
-		//	Anal_Check_ISO();
-		//}
-
 		Check_ISO();
+
+		if(IfAddressMatched == 1)
+		{
+			Check_Com();
+			IfAddressMatched = 0;
+		}
 
 		if(Reinit_Analog_uart == 1)
 		{
@@ -263,6 +198,10 @@ void ANAL_RED_LED(uint8_t OnOff){
 	}
 	else if(OnOff == LED_OFF){
 		HAL_GPIO_WritePin(a_LED_RED_r_IN3_SIG_GPIO_Port, a_LED_RED_r_IN3_SIG_Pin, GPIO_PIN_SET);
+	}
+	else if(OnOff == LED_TOGGLE)
+	{
+		HAL_GPIO_TogglePin(a_LED_RED_r_IN3_SIG_GPIO_Port, a_LED_RED_r_IN3_SIG_Pin);
 	}
 }
 
@@ -369,10 +308,9 @@ void Read_Analog_ADC(void)
 	{
 //		ANAL_RED_LED(LED_ON);  // LOW
 
-//		Ana_photo_Sen_12bit = ReturnToPercent_afterReadAdcValue(4, DAC_VALUE, 30, 1);
 		Ana_photo_Sen_12bit = Return_Ana_photo_Sen_12bit(PGA, DAC_VALUE, 30);
 
-		ReturnPercent = MatchAdcValueToPercentValue(ADCMappingTable_Below22Percent, Ana_photo_Sen_12bit);
+		ReturnPercent = MatchAdcValueToPercentValue(AdcToPercent_MappingTable, Ana_photo_Sen_12bit);
 //		ANAL_RED_LED(LED_OFF); // HIGH
 	}
 }
