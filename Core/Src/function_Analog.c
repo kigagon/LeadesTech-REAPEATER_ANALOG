@@ -113,11 +113,19 @@ void Run_Analoge_Mode(void){
 //	}
 //	Read_Analog_ADC();
 
-
-
+	uint8_t Value[2];
+	INA219_t ina219;
 	while(1){
-		result1 = Read16(&ina219_1, 0x00);
-		result2 = Read16(&ina219_1, 0x3E);
+//		result1 = Read16(&ina219_1, 0x00);
+//		result2 = Read16(&ina219_1, 0x3E);
+//		HAL_I2C_Mem_Read(&hi2c1, 0x80, 0X3e, 1, Value, 2, 1000);
+
+		uint8_t IsInitSuccess = 0;
+		    while(!IsInitSuccess)
+		    {
+		    	IsInitSuccess = INA219_Init(&ina219, &hi2c1, INA219_ADDRESS);
+		    }
+		    (int16_t)Read16(&ina219, INA219_REG_SHUNTVOLTAGE);
 	}
 	//LPUART2_UART_RE_Init(0, 9600);
 	while(1){

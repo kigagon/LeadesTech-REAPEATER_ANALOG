@@ -170,6 +170,7 @@ extern float DAC_VALUE;
 extern ADC_HandleTypeDef hadc1;
 extern DAC_HandleTypeDef hdac1;
 extern OPAMP_HandleTypeDef hopamp1;
+extern I2C_HandleTypeDef hi2c1;
 
 #define Input_Address		0
 #define All_Add_Address		253
