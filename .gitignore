@@ -19,12 +19,14 @@
 .project
 .cproject
 .metadata/
+.settings/
 
 # Other temporary or generated files
 *.bak
 *.tmp
 *.swp
 *~
+.gitignore
 
 # macOS 
 .DS_Store
