@@ -2364,7 +2364,12 @@ void Com_C2(void){
 		Rep_port_Charge_Time[3] = (UART_RX_buf[3]>>4) & 0x0f;
 */
 		for(int i=0; i<4 ; i++){
-			Charge_Time[i] = ((UART_RX_buf[3]>>4) & 0x0f)*10 - 2;
+			if(UART_RX_buf[3] == 0){
+				Charge_Time[i] = 0;
+			}
+			else{
+				Charge_Time[i] = ((UART_RX_buf[3]>>4) & 0x0f)*10 - 2;
+			}
 			Rep_port_Charge_Time[i] = Charge_Time[i];
 		}
 //		if( ((UART_RX_buf[3]>>4) & 0x0f) > 0){
@@ -2424,10 +2429,19 @@ void Com_C4(void){
 		Rep_port_Charge_Time[2] = (UART_RX_buf[3]>>4) & 0x0f;
 		Rep_port_Charge_Time[3] = (UART_RX_buf[3]>>4) & 0x0f;
 */
+		/*
 		for(int i=0; i<4 ; i++){
 			Charge_Time[i] = ((UART_RX_buf[3]>>4) & 0x0f)*10 - 2;
 			Rep_port_Charge_Time[i] = Charge_Time[i];
 		}
+		*/
+
+		for(int i=0; i<4 ; i++){
+			Charge_Time[i] =0;
+			Rep_port_Charge_Time[i] = Charge_Time[i];
+		}
+
+
 //		if( ((UART_RX_buf[3]>>4) & 0x0f) > 0){
 //			Rep_All_port_Charge_Mode = 1;
 //		}

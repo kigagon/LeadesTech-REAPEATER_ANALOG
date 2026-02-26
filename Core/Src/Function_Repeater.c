@@ -376,8 +376,13 @@ void Check_Charge_Mode(void){
 	for(int i =0; i<4 ; ++i){
 		if(Rep_Input_value[i] == 1){
 			if((Rep_Pre_Input_value[i] == 0)&(Rep_port_Charge_Mode[i] == Charge_Mode_On)){
-				if(Rep_port_Charge_First_Mode[i] == Charge_Mode_First_Ready){
-					Rep_port_Charge_First_Mode[i] = Charge_Mode_First_On; //Timer Count On
+				if(Rep_port_Charge_Time[i] == 0){
+					Rep_port_Charge_First_Mode[i] = Charge_Mode_First_Ready;
+				}
+				else{
+					if(Rep_port_Charge_First_Mode[i] == Charge_Mode_First_Ready){
+						Rep_port_Charge_First_Mode[i] = Charge_Mode_First_On; //Timer Count On
+					}
 				}
 			}
 		}

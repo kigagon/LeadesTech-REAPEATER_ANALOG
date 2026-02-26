@@ -256,6 +256,7 @@ void TIM3_IRQHandler(void)
 				  & (Rep_port_Charge_Cnt[i] < Charge_Surveillance)){
 				//Rep_port_Charge_First_Mode[i] = Charge_Mode_First_Off; //Timer Count Off
 				Rep_Set_In(i,Input_On);
+				Rep_port_Charge_First_Mode[i] = Charge_Mode_First_Off;
 			}
 		  else if(Rep_port_Charge_Cnt[i] >= ((Rep_port_Charge_Time[i] * 5) + Charge_Cnt_Max) + Charge_Surveillance){
 			  Rep_port_Charge_First_Mode[i] = Charge_Mode_First_Off; //Timer Count Off
