@@ -44,6 +44,7 @@ uint8_t Ch1_Out_Off_Cnt = 0;
 uint16_t Ch1_Out_Cnt_Sum;
 uint8_t Ch1_Out_Cnt[Cnt_Num];
 
+uint8_t Rep_In_On_Controll[4];
 
 void Run_Repeater_Mode(void){
 
@@ -108,6 +109,11 @@ void Run_Repeater_Mode(void){
 //	Rep_Set_Out(Output_Port2,Output_On );
 //	Rep_Set_Out(Output_Port3,Output_On );
 //	Rep_Set_Out(Output_Port4,Output_On );
+
+	Rep_Set_In(Input_Port1,Input_On);
+	Rep_Set_In(Input_Port2,Input_On);
+	Rep_Set_In(Input_Port3,Input_On);
+	Rep_Set_In(Input_Port4,Input_On);
 
 	for(int i = 0 ; i<4 ; i++){
 		Rep_port_Charge_Setting[i] = Charge_Set_Off;
@@ -337,6 +343,7 @@ void Rep_Set_Out(int Port , int Status){
 
 void Rep_Set_In(int Port , int Status){
 
+	Rep_In_On_Controll[Port] = Status;
 	if(Port == Input_Port1){
 		if(Status == Input_Off){
 			HAL_GPIO_WritePin(a_DIP_ADD6_r_CH1_SW_GPIO_Port,a_DIP_ADD6_r_CH1_SW_Pin,GPIO_PIN_SET);
@@ -389,7 +396,9 @@ void Check_Charge_Mode(void){
 		else{
 			if((Rep_Pre_Input_value[i] == 0)&(Rep_port_Charge_Mode[i] == Charge_Mode_On)){
 				if(Rep_port_Charge_First_Mode[i] == Charge_Mode_First_On){
-
+					if(Rep_In_On_Controll[i] == Input_On ){
+						Rep_port_Charge_First_Mode[i] = Charge_Mode_First_Ready;
+					}
 				}
 				else if(Rep_port_Charge_First_Mode[i] == Charge_Mode_First_Off){
 					Rep_port_Charge_First_Mode[i] = Charge_Mode_First_Ready;

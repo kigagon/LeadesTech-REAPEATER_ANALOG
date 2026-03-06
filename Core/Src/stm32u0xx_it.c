@@ -248,7 +248,14 @@ void TIM3_IRQHandler(void)
 	  }
 
 	  if(Rep_port_Charge_First_Mode[i] == Charge_Mode_First_On){
-		  if( (Rep_port_Charge_Cnt[i] >= (Rep_port_Charge_Time[i] * 5))
+
+		  if(Rep_port_Charge_Cnt[i] == (15 * 5)){
+			  Rep_Set_In(i,Input_Off);
+		  }
+		  else if(Rep_port_Charge_Cnt[i] == (19 * 5)){
+			  Rep_Set_In(i,Input_On);
+		  }
+		  else if( (Rep_port_Charge_Cnt[i] >= (Rep_port_Charge_Time[i] * 5))
 				  &  (Rep_port_Charge_Cnt[i] < ((Rep_port_Charge_Time[i] * 5) + Charge_Cnt_Max)) ){
 				Rep_Set_In(i,Input_Off);
 			}

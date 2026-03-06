@@ -57,6 +57,8 @@ extern uint8_t Ch1_Out_Off_Cnt;
 extern uint16_t Ch1_On_Save_Sum;
 extern uint16_t Ch1_Off_Save_Sum;
 
+extern uint8_t Rep_In_On_Controll[4];
+
 void Run_Repeater_Mode(void);
 void Rep_TX_LED(uint8_t OnOff);
 void Rep_ISO_LED(uint8_t OnOff);
