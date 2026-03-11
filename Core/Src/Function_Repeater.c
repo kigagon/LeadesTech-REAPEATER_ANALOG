@@ -30,7 +30,9 @@ int Rep_Sum_Fuse_Open[4];
 
 //Test mode
 uint8_t IO_Tset_Mode = 0;
+
 uint8_t Ch1_Tset_Mode = 0;
+//uint8_t Ch1_Tset_Mode = 1;
 
 #define Ch1_Open_Cnt_Num	100
 uint8_t Ch1_Open_Cnt[Ch1_Open_Cnt_Num];
